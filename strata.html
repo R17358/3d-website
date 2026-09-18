@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STRATA — Scroll Through Deep Time</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --void:      #08070A;
+    --ink:       #E9E4D8;
+    --ink-dim:   #8B8577;
+    --amber:     #CE8A4C;
+    --ember:     #D6572A;
+    --bone:      #C9BFA6;
+    --line:      rgba(233, 228, 216, 0.10);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: var(--void); color: var(--ink); overflow-x: hidden; }
+  body { font-family: 'Space Grotesk', -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--amber); color: var(--void); }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+
+  #scene-wrap { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1; }
+  #canvas { display: block; width: 100%; height: 100%; }
+  #vignette {
+    position: fixed; inset: 0; z-index: 2; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 50%, transparent 35%, rgba(8,7,10,0.88) 100%);
+  }
+  #scroll-track { position: relative; z-index: 0; height: 780vh; width: 100%; }
+
+  .hud { position: fixed; z-index: 4; pointer-events: none; }
+
+  #depth-readout {
+    left: clamp(16px, 4vw, 40px); bottom: clamp(16px, 4vh, 36px);
+    font-size: 12px; letter-spacing: 0.04em; color: var(--ink-dim); line-height: 1.7;
+  }
+  #depth-readout .val { color: var(--amber); }
+  #depth-readout .label { display: inline-block; width: 62px; }
+
+  #gauge {
+    right: clamp(14px, 3.5vw, 34px); top: 50%; transform: translateY(-50%);
+    width: 20px; height: min(50vh, 380px);
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  }
+  #gauge .rail { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--line); transform: translateX(-50%); }
+  #gauge .fill { position: absolute; left: 50%; bottom: 0; width: 1px; background: var(--amber); transform: translateX(-50%); height: 0%; transition: height 0.05s linear; }
+  #gauge .tick { position: relative; width: 7px; height: 1px; background: var(--ink-dim); z-index: 1; }
+  #gauge .tick.active { background: var(--amber); width: 15px; }
+  #gauge .tick-label {
+    position: absolute; right: 14px; font-size: 9.5px; letter-spacing: 0.08em;
+    color: var(--ink-dim); opacity: 0; transition: opacity 0.2s ease; white-space: nowrap;
+  }
+  #gauge .tick.active .tick-label { opacity: 1; color: var(--amber); }
+
+  #scroll-cue {
+    left: 50%; bottom: 34px; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    font-size: 10.5px; letter-spacing: 0.14em; color: var(--ink-dim);
+    transition: opacity 0.4s ease;
+  }
+  #scroll-cue .track { width: 1px; height: 34px; background: var(--line); position: relative; overflow: hidden; }
+  #scroll-cue .dot { position: absolute; left: -1.5px; width: 4px; height: 4px; border-radius: 50%; background: var(--amber); animation: fall 1.8s ease-in-out infinite; }
+  @keyframes fall { 0% { top: -6px; opacity: 0; } 25% { opacity: 1; } 85% { opacity: 1; } 100% { top: 34px; opacity: 0; } }
+
+  .panel {
+    position: fixed; z-index: 3; left: 0; right: 0; top: 0; bottom: 0;
+    display: flex; align-items: center; pointer-events: none; opacity: 0;
+    will-change: opacity, transform;
+  }
+  .panel-inner { width: min(560px, 86vw); margin-left: clamp(20px, 8vw, 110px); }
+  .panel.align-center .panel-inner { margin: 0 auto; text-align: center; width: min(640px, 88vw); }
+
+  .marker {
+    font-size: 11px; letter-spacing: 0.12em; color: var(--amber); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .marker::before { content: ''; width: 22px; height: 1px; background: var(--amber); display: inline-block; }
+  .panel.align-center .marker { justify-content: center; }
+  .panel.align-center .marker::before { display: none; }
+
+  .panel h2 { font-weight: 600; font-size: clamp(27px, 4.2vw, 44px); line-height: 1.1; letter-spacing: -0.01em; margin-bottom: 18px; }
+  .panel p { font-size: clamp(14.5px, 1.6vw, 17px); line-height: 1.65; color: var(--ink-dim); max-width: 46ch; }
+  .panel.align-center p { max-width: 46ch; margin: 0 auto; }
+  .panel .stat-row {
+    margin-top: 24px; display: flex; gap: 28px; flex-wrap: wrap;
+  }
+  .panel.align-center .stat-row { justify-content: center; }
+  .panel .stat { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.04em; }
+  .panel .stat b { display: block; color: var(--bone); font-size: 15px; font-weight: 500; margin-bottom: 3px; font-family: 'IBM Plex Mono', monospace; }
+
+  .skeleton-diagram { width: 200px; max-width: 46vw; margin-bottom: 18px; }
+  .skeleton-diagram svg { width: 100%; height: auto; display: block; }
+  .panel.align-center .skeleton-diagram { margin: 0 auto 18px; }
+
+  #hero h1 { font-weight: 700; font-size: clamp(46px, 9.5vw, 108px); letter-spacing: -0.02em; line-height: 0.92; }
+  #hero .lede { font-size: clamp(15px, 1.7vw, 18px); color: var(--ink-dim); max-width: 42ch; margin: 20px auto 0; line-height: 1.6; }
+
+  #final .divider { width: 1px; height: 46px; background: linear-gradient(var(--amber), transparent); margin: 0 auto 26px; }
+  #final .credit { margin-top: 34px; font-size: 11px; letter-spacing: 0.08em; color: var(--ink-dim); opacity: 0.55; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #scroll-cue .dot { animation: none; top: 8px; opacity: 0.6; }
+  }
+</style>
+</head>
+<body>
+
+<div id="scroll-track"></div>
+<div id="scene-wrap"><canvas id="canvas"></canvas></div>
+<div id="vignette"></div>
+
+<div class="hud" id="depth-readout" aria-hidden="true">
+  <div><span class="label">TIME</span><span class="val mono" id="depth-val">252.0 MYA</span></div>
+  <div><span class="label">PERIOD</span><span class="val mono" id="stage-val">PRE-TRIASSIC</span></div>
+</div>
+
+<div class="hud" id="gauge" aria-hidden="true">
+  <div class="rail"></div>
+  <div class="fill" id="gauge-fill"></div>
+  <div class="tick" data-i="0"><span class="tick-label">START</span></div>
+  <div class="tick" data-i="1"><span class="tick-label">TRIASSIC</span></div>
+  <div class="tick" data-i="2"><span class="tick-label">JURASSIC</span></div>
+  <div class="tick" data-i="3"><span class="tick-label">CRETACEOUS</span></div>
+  <div class="tick" data-i="4"><span class="tick-label">IMPACT</span></div>
+  <div class="tick" data-i="5"><span class="tick-label">TODAY</span></div>
+</div>
+
+<div class="hud" id="scroll-cue"><span>SCROLL</span><div class="track"><div class="dot"></div></div></div>
+
+<section class="panel align-center" id="hero" data-range="0,0.07">
+  <div class="panel-inner">
+    <h1>STRATA</h1>
+    <p class="lede">You're standing above 252 million years of rock. Every scroll from here takes you one layer deeper — the way a paleontologist actually reads the ground.</p>
+  </div>
+</section>
+
+<section class="panel" id="s1" data-range="0.10,0.24">
+  <div class="panel-inner">
+    <div class="skeleton-diagram" aria-hidden="true">
+      <svg viewBox="0 0 240 140">
+        <g stroke="var(--bone)" stroke-width="1.6" stroke-linecap="round" opacity="0.8" fill="none">
+          <line x1="200" y1="28" x2="178" y2="42"/>
+          <line x1="178" y1="42" x2="150" y2="58"/>
+          <line x1="150" y1="58" x2="92" y2="58"/>
+          <line x1="92" y1="58" x2="55" y2="66"/>
+          <line x1="55" y1="66" x2="15" y2="80"/>
+          <line x1="150" y1="58" x2="140" y2="70"/>
+          <line x1="140" y1="70" x2="132" y2="78"/>
+          <line x1="95" y1="58" x2="100" y2="92"/>
+          <line x1="100" y1="92" x2="90" y2="120"/>
+          <line x1="90" y1="120" x2="108" y2="128"/>
+          <line x1="85" y1="58" x2="65" y2="80"/>
+          <line x1="65" y1="80" x2="55" y2="108"/>
+          <line x1="55" y1="108" x2="72" y2="112"/>
+        </g>
+        <g fill="var(--amber)">
+          <circle cx="200" cy="28" r="3"/><circle cx="178" cy="42" r="2.4"/><circle cx="150" cy="58" r="2.4"/>
+          <circle cx="92" cy="58" r="2.4"/><circle cx="55" cy="66" r="2.2"/><circle cx="15" cy="80" r="2"/>
+          <circle cx="140" cy="70" r="2"/><circle cx="132" cy="78" r="2"/><circle cx="95" cy="58" r="2.2"/>
+          <circle cx="100" cy="92" r="2.2"/><circle cx="90" cy="120" r="2.2"/><circle cx="108" cy="128" r="2"/>
+          <circle cx="85" cy="58" r="2.2"/><circle cx="65" cy="80" r="2.2"/><circle cx="55" cy="108" r="2.2"/>
+          <circle cx="72" cy="112" r="2"/>
+        </g>
+      </svg>
+    </div>
+    <div class="marker mono">TRIASSIC — 252–201 MYA</div>
+    <h2>Dinosaurs start small, after everything else nearly ended.</h2>
+    <p>This period opens right after Earth's worst extinction ever wiped out most life on the planet. Into that empty world walk the first dinosaurs — fast, bipedal, mostly no bigger than a dog. Herrerasaurus and Eoraptor are among the earliest known.</p>
+    <div class="stat-row">
+      <div class="stat mono">SPAN<br><b>51M YEARS</b></div>
+      <div class="stat mono">CONTINENT<br><b>PANGAEA</b></div>
+      <div class="stat mono">AVG. SIZE<br><b>&lt; 3M LONG</b></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel" id="s2" data-range="0.28,0.42">
+  <div class="panel-inner">
+    <div class="skeleton-diagram" aria-hidden="true">
+      <svg viewBox="0 0 240 140">
+        <g stroke="var(--bone)" stroke-width="1.6" stroke-linecap="round" opacity="0.8" fill="none">
+          <line x1="220" y1="14" x2="195" y2="32"/>
+          <line x1="195" y1="32" x2="170" y2="50"/>
+          <line x1="170" y1="50" x2="148" y2="64"/>
+          <line x1="148" y1="64" x2="122" y2="76"/>
+          <line x1="122" y1="76" x2="55" y2="76"/>
+          <line x1="55" y1="76" x2="30" y2="82"/>
+          <line x1="30" y1="82" x2="10" y2="96"/>
+          <line x1="122" y1="76" x2="124" y2="106"/>
+          <line x1="124" y1="106" x2="124" y2="132"/>
+          <line x1="122" y1="76" x2="112" y2="108"/>
+          <line x1="112" y1="108" x2="112" y2="132"/>
+          <line x1="55" y1="76" x2="53" y2="106"/>
+          <line x1="53" y1="106" x2="53" y2="132"/>
+          <line x1="55" y1="76" x2="65" y2="108"/>
+          <line x1="65" y1="108" x2="65" y2="132"/>
+        </g>
+        <g fill="var(--amber)">
+          <circle cx="220" cy="14" r="3"/><circle cx="195" cy="32" r="2.4"/><circle cx="170" cy="50" r="2.4"/>
+          <circle cx="148" cy="64" r="2.4"/><circle cx="122" cy="76" r="2.8"/><circle cx="55" cy="76" r="2.8"/>
+          <circle cx="30" cy="82" r="2.2"/><circle cx="10" cy="96" r="2"/>
+          <circle cx="124" cy="106" r="2"/><circle cx="124" cy="132" r="2"/>
+          <circle cx="112" cy="108" r="2"/><circle cx="112" cy="132" r="2"/>
+          <circle cx="53" cy="106" r="2"/><circle cx="53" cy="132" r="2"/>
+          <circle cx="65" cy="108" r="2"/><circle cx="65" cy="132" r="2"/>
+        </g>
+      </svg>
+    </div>
+    <div class="marker mono">JURASSIC — 201–145 MYA</div>
+    <h2>Pangaea splits, and the giants show up.</h2>
+    <p>Wetter climates and breaking continents open room to grow. Sauropods like Brachiosaurus and Diplodocus become some of the largest land animals ever, armored Stegosaurus appears, and predators like Allosaurus scale up to match.</p>
+    <div class="stat-row">
+      <div class="stat mono">TALLEST KNOWN<br><b>~12M (BRACHIOSAURUS)</b></div>
+      <div class="stat mono">LONGEST KNOWN<br><b>~30M+ (DIPLODOCIDS)</b></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel" id="s3" data-range="0.46,0.60">
+  <div class="panel-inner">
+    <div class="skeleton-diagram" aria-hidden="true">
+      <svg viewBox="0 0 240 140">
+        <g stroke="var(--bone)" stroke-width="1.6" stroke-linecap="round" opacity="0.8" fill="none">
+          <line x1="200" y1="26" x2="165" y2="42"/>
+          <line x1="165" y1="42" x2="108" y2="54"/>
+          <line x1="108" y1="54" x2="65" y2="58"/>
+          <line x1="65" y1="58" x2="25" y2="50"/>
+          <line x1="25" y1="50" x2="5" y2="38"/>
+          <line x1="112" y1="54" x2="118" y2="90"/>
+          <line x1="118" y1="90" x2="106" y2="118"/>
+          <line x1="106" y1="118" x2="122" y2="126"/>
+          <line x1="100" y1="54" x2="85" y2="88"/>
+          <line x1="85" y1="88" x2="80" y2="116"/>
+          <line x1="80" y1="116" x2="96" y2="124"/>
+          <line x1="165" y1="42" x2="150" y2="48"/>
+          <line x1="150" y1="48" x2="143" y2="58"/>
+        </g>
+        <g fill="var(--amber)">
+          <circle cx="200" cy="26" r="3.2"/><circle cx="165" cy="42" r="2.4"/><circle cx="108" cy="54" r="2.6"/>
+          <circle cx="65" cy="58" r="2.2"/><circle cx="25" cy="50" r="2"/><circle cx="5" cy="38" r="1.8"/>
+          <circle cx="118" cy="90" r="2"/><circle cx="106" cy="118" r="2"/><circle cx="122" cy="126" r="1.8"/>
+          <circle cx="85" cy="88" r="2"/><circle cx="80" cy="116" r="2"/><circle cx="96" cy="124" r="1.8"/>
+          <circle cx="150" cy="48" r="1.8"/><circle cx="143" cy="58" r="1.6"/>
+        </g>
+      </svg>
+    </div>
+    <div class="marker mono">CRETACEOUS — 145–66 MYA</div>
+    <h2>The most diverse period dinosaurs ever have.</h2>
+    <p>Flowering plants spread across the planet for the first time, and dinosaur diversity peaks alongside them. This is the world of Tyrannosaurus, Triceratops, and hundreds of other named species — more than either period before it.</p>
+    <div class="stat-row">
+      <div class="stat mono">NAMED SPECIES<br><b>700+</b></div>
+      <div class="stat mono">NEW ARRIVAL<br><b>FLOWERING PLANTS</b></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel" id="s4" data-range="0.64,0.78">
+  <div class="panel-inner">
+    <div class="skeleton-diagram" aria-hidden="true">
+      <svg viewBox="0 0 240 140">
+        <g stroke="var(--ember)" stroke-width="1.6" stroke-linecap="round" opacity="0.75" fill="none">
+          <line x1="30" y1="20" x2="48" y2="12"/>
+          <line x1="90" y1="10" x2="82" y2="30"/>
+          <line x1="150" y1="18" x2="172" y2="26"/>
+          <line x1="10" y1="70" x2="30" y2="60"/>
+          <line x1="70" y1="65" x2="88" y2="78"/>
+          <line x1="130" y1="70" x2="112" y2="58"/>
+          <line x1="190" y1="65" x2="205" y2="80"/>
+          <line x1="40" y1="115" x2="58" y2="100"/>
+          <line x1="100" y1="120" x2="118" y2="105"/>
+          <line x1="160" y1="112" x2="145" y2="128"/>
+          <line x1="205" y1="115" x2="220" y2="100"/>
+        </g>
+        <g fill="var(--ember)" opacity="0.85">
+          <circle cx="30" cy="20" r="2"/><circle cx="48" cy="12" r="1.6"/><circle cx="90" cy="10" r="1.8"/>
+          <circle cx="82" cy="30" r="1.6"/><circle cx="150" cy="18" r="1.8"/><circle cx="172" cy="26" r="1.6"/>
+          <circle cx="10" cy="70" r="1.8"/><circle cx="30" cy="60" r="1.6"/><circle cx="70" cy="65" r="1.8"/>
+          <circle cx="88" cy="78" r="1.6"/><circle cx="130" cy="70" r="1.8"/><circle cx="112" cy="58" r="1.6"/>
+          <circle cx="190" cy="65" r="1.8"/><circle cx="205" cy="80" r="1.6"/><circle cx="40" cy="115" r="1.6"/>
+          <circle cx="58" cy="100" r="1.6"/><circle cx="100" cy="120" r="1.6"/><circle cx="118" cy="105" r="1.6"/>
+          <circle cx="160" cy="112" r="1.6"/><circle cx="145" cy="128" r="1.6"/><circle cx="205" cy="115" r="1.6"/>
+          <circle cx="220" cy="100" r="1.6"/>
+        </g>
+      </svg>
+    </div>
+    <div class="marker mono">K–PG BOUNDARY — 66 MYA</div>
+    <h2>Then, in geological terms, it ends in an afternoon.</h2>
+    <p>An asteroid roughly 10km wide strikes near what is now the Yucatán Peninsula. The impact and its aftermath end the reign of every non-avian dinosaur — about 75% of all species on Earth — and leave a thin layer of iridium-rich clay found worldwide.</p>
+    <div class="stat-row">
+      <div class="stat mono">IMPACTOR SIZE<br><b>~10KM WIDE</b></div>
+      <div class="stat mono">SPECIES LOST<br><b>~75%</b></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel align-center" id="final" data-range="0.90,1.0">
+  <div class="panel-inner">
+    <div class="divider"></div>
+    <div class="skeleton-diagram" aria-hidden="true">
+      <svg viewBox="0 0 240 140">
+        <g stroke="var(--bone)" stroke-width="1.6" stroke-linecap="round" opacity="0.85" fill="none">
+          <line x1="150" y1="55" x2="165" y2="58"/>
+          <line x1="150" y1="55" x2="120" y2="65"/>
+          <line x1="120" y1="65" x2="90" y2="70"/>
+          <line x1="90" y1="70" x2="65" y2="85"/>
+          <line x1="110" y1="65" x2="75" y2="30"/>
+          <line x1="75" y1="30" x2="45" y2="15"/>
+          <line x1="122" y1="66" x2="160" y2="35"/>
+          <line x1="160" y1="35" x2="190" y2="22"/>
+          <line x1="110" y1="68" x2="112" y2="95"/>
+          <line x1="112" y1="95" x2="105" y2="108"/>
+        </g>
+        <g fill="var(--amber)">
+          <circle cx="150" cy="55" r="2.6"/><circle cx="165" cy="58" r="1.6"/><circle cx="120" cy="65" r="2.2"/>
+          <circle cx="90" cy="70" r="2.2"/><circle cx="65" cy="85" r="1.8"/><circle cx="75" cy="30" r="1.8"/>
+          <circle cx="45" cy="15" r="1.6"/><circle cx="160" cy="35" r="1.8"/><circle cx="190" cy="22" r="1.6"/>
+          <circle cx="112" cy="95" r="1.8"/><circle cx="105" cy="108" r="1.6"/>
+        </g>
+      </svg>
+    </div>
+    <div class="marker mono" style="justify-content:center">TODAY</div>
+    <h2>One dinosaur lineage never actually left.</h2>
+    <p>A branch of small feathered theropods survived the impact. We call their descendants birds — around 11,000 living species, more than every species of mammal combined. Look up. There's a dinosaur outside your window right now.</p>
+    <div class="credit mono">STRATA — A SCROLLED TIMELINE, BUILT IN THREE.JS</div>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var canvas = document.getElementById('canvas');
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x08070A, 1);
+
+  var scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x08070A, 0.012);
+
+  var camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 2000);
+  camera.position.set(0, 0, 6);
+
+  var AMBER = 0xce8a4c, INK = 0xe9e4d8, EMBER = 0xd6572a, BONE = 0xc9bfa6;
+
+  var worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+
+  // starfield / sediment specks
+  (function addSpecks() {
+    var geo = new THREE.BufferGeometry();
+    var count = 900;
+    var pos = new Float32Array(count * 3);
+    for (var i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 60;
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 60;
+      pos[i * 3 + 2] = -Math.random() * 900;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    var mat = new THREE.PointsMaterial({ color: 0x8a8375, size: 0.9, sizeAttenuation: true, transparent: true, opacity: 0.45 });
+    worldGroup.add(new THREE.Points(geo, mat));
+  })();
+
+  // ---- Hero: planet + armillary time-rings at z=0 ----
+  var heroGroup = new THREE.Group();
+  var heroGeo = new THREE.IcosahedronGeometry(1.4, 1);
+  var heroWire = new THREE.LineSegments(new THREE.EdgesGeometry(heroGeo), new THREE.LineBasicMaterial({ color: INK, transparent: true, opacity: 0.55 }));
+  heroGroup.add(heroWire);
+  var ringSpecs = [[2.2, 0], [2.55, Math.PI / 3], [2.9, -Math.PI / 4]];
+  var heroRings = [];
+  ringSpecs.forEach(function (spec) {
+    var rg = new THREE.TorusGeometry(spec[0], 0.006, 8, 80);
+    var rm = new THREE.LineSegments(new THREE.EdgesGeometry(rg), new THREE.LineBasicMaterial({ color: AMBER, transparent: true, opacity: 0.4 }));
+    rm.rotation.x = Math.PI / 2 + spec[1];
+    rm.rotation.y = spec[1] * 0.6;
+    heroGroup.add(rm);
+    heroRings.push(rm);
+  });
+  worldGroup.add(heroGroup);
+
+  // ---- Stage 1: Triassic — excavation grid lattice, z=-140 ----
+  var latticeGroup = new THREE.Group();
+  latticeGroup.position.z = -140;
+  (function buildLattice() {
+    var spacing = 3.2, rings = 5, perRing = 9;
+    for (var r = 0; r < rings; r++) {
+      for (var i = 0; i < perRing; i++) {
+        var geo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+        var m = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: BONE, transparent: true, opacity: 0.30 }));
+        var ang = (i / perRing) * Math.PI * 2;
+        var rad = 4.2 + (r % 2) * 0.6;
+        m.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, -r * spacing);
+        m.rotation.set(Math.random(), Math.random(), Math.random());
+        latticeGroup.add(m);
+      }
+    }
+  })();
+  worldGroup.add(latticeGroup);
+
+  // ---- Stage 2: Jurassic — ribcage skeleton, z=-320 ----
+  var ribGroup = new THREE.Group();
+  ribGroup.position.z = -320;
+  (function buildRibcage() {
+    var spineGeo = new THREE.CylinderGeometry(0.05, 0.05, 7, 8);
+    var spine = new THREE.LineSegments(new THREE.EdgesGeometry(spineGeo), new THREE.LineBasicMaterial({ color: BONE, transparent: true, opacity: 0.5 }));
+    spine.rotation.z = Math.PI / 2;
+    ribGroup.add(spine);
+    var ribCount = 9;
+    for (var i = 0; i < ribCount; i++) {
+      var t = (i / (ribCount - 1)) - 0.5;
+      var ribGeo = new THREE.TorusGeometry(1.5, 0.035, 6, 20, Math.PI * 1.15);
+      var rib = new THREE.LineSegments(new THREE.EdgesGeometry(ribGeo), new THREE.LineBasicMaterial({ color: INK, transparent: true, opacity: 0.45 }));
+      rib.rotation.y = Math.PI / 2;
+      rib.rotation.z = Math.PI * 0.92;
+      rib.position.x = t * 6.4;
+      var taper = 1 - Math.abs(t) * 0.5;
+      rib.scale.set(taper, taper, taper);
+      ribGroup.add(rib);
+    }
+  })();
+  worldGroup.add(ribGroup);
+
+  // ---- Stage 3: Cretaceous — orbiting species diversity, z=-495 ----
+  var assemblyGroup = new THREE.Group();
+  assemblyGroup.position.z = -495;
+  var assemblyParts = [];
+  (function buildAssembly() {
+    var shapes = [
+      new THREE.OctahedronGeometry(1.1, 0),
+      new THREE.TetrahedronGeometry(1.0, 0),
+      new THREE.IcosahedronGeometry(0.9, 0),
+      new THREE.OctahedronGeometry(0.8, 0),
+      new THREE.TetrahedronGeometry(0.7, 0)
+    ];
+    for (var i = 0; i < shapes.length; i++) {
+      var mat = new THREE.LineBasicMaterial({ color: i % 2 === 0 ? INK : AMBER, transparent: true, opacity: 0.55 });
+      var m = new THREE.LineSegments(new THREE.EdgesGeometry(shapes[i]), mat);
+      var ang = (i / shapes.length) * Math.PI * 2;
+      m.position.set(Math.cos(ang) * 2.6, Math.sin(ang) * 2.6, 0);
+      assemblyGroup.add(m);
+      assemblyParts.push({ mesh: m, angle: ang, radius: 2.6 });
+    }
+  })();
+  worldGroup.add(assemblyGroup);
+
+  // ---- Stage 4: K-Pg impact — incoming asteroid + burst, z=-670 ----
+  var igniteGroup = new THREE.Group();
+  igniteGroup.position.z = -670;
+
+  var impactorGeo = new THREE.IcosahedronGeometry(0.55, 0);
+  var impactorMat = new THREE.LineSegments(new THREE.EdgesGeometry(impactorGeo), new THREE.LineBasicMaterial({ color: EMBER, transparent: true, opacity: 0.0 }));
+  igniteGroup.add(impactorMat);
+
+  var burstCount = 500;
+  var burstGeo = new THREE.BufferGeometry();
+  var burstPos = new Float32Array(burstCount * 3);
+  var burstDir = [];
+  for (var b = 0; b < burstCount; b++) {
+    burstPos[b * 3] = 0; burstPos[b * 3 + 1] = 0; burstPos[b * 3 + 2] = 0;
+    var theta = Math.random() * Math.PI * 2;
+    var phi = Math.acos(2 * Math.random() - 1);
+    burstDir.push([Math.sin(phi) * Math.cos(theta), Math.sin(phi) * Math.sin(theta), Math.cos(phi)]);
+  }
+  burstGeo.setAttribute('position', new THREE.BufferAttribute(burstPos, 3));
+  var burstMat = new THREE.PointsMaterial({ color: EMBER, size: 1.2, transparent: true, opacity: 0.0 });
+  var burstPoints = new THREE.Points(burstGeo, burstMat);
+  igniteGroup.add(burstPoints);
+  worldGroup.add(igniteGroup);
+
+  // ---- Stage 5: Today — wings opening, z=-760 ----
+  var birdGroup = new THREE.Group();
+  birdGroup.position.z = -760;
+  var bodyGeo = new THREE.IcosahedronGeometry(0.35, 0);
+  var bodyMesh = new THREE.LineSegments(new THREE.EdgesGeometry(bodyGeo), new THREE.LineBasicMaterial({ color: BONE, transparent: true, opacity: 0.0 }));
+  bodyMesh.scale.set(1, 0.8, 1.6);
+  birdGroup.add(bodyMesh);
+
+  function makeWing(sign) {
+    var wg = new THREE.ConeGeometry(2.0, 0.05, 3);
+    var wing = new THREE.LineSegments(new THREE.EdgesGeometry(wg), new THREE.LineBasicMaterial({ color: AMBER, transparent: true, opacity: 0.0 }));
+    wing.rotation.z = Math.PI / 2 * sign;
+    wing.position.x = 0.15 * sign;
+    var pivot = new THREE.Group();
+    pivot.add(wing);
+    pivot.userData.wingMat = wing.material;
+    birdGroup.add(pivot);
+    return pivot;
+  }
+  var wingL = makeWing(1);
+  var wingR = makeWing(-1);
+  worldGroup.add(birdGroup);
+
+  /* ---------------- SCROLL -> PROGRESS ---------------- */
+
+  var stageRanges = [];
+  document.querySelectorAll('.panel').forEach(function (el) {
+    var r = el.getAttribute('data-range').split(',').map(Number);
+    stageRanges.push({ el: el, start: r[0], end: r[1] });
+  });
+
+  var gaugeFill = document.getElementById('gauge-fill');
+  var ticks = document.querySelectorAll('#gauge .tick');
+  var depthVal = document.getElementById('depth-val');
+  var stageVal = document.getElementById('stage-val');
+  var scrollCue = document.getElementById('scroll-cue');
+  var stageNames = ['PRE-TRIASSIC', 'TRIASSIC', 'JURASSIC', 'CRETACEOUS', 'K-PG IMPACT', 'PRESENT DAY'];
+
+  var targetProgress = 0, curProgress = 0;
+
+  function getScrollProgress() {
+    var track = document.getElementById('scroll-track');
+    var max = track.offsetHeight - window.innerHeight;
+    var y = window.scrollY || window.pageYOffset;
+    return Math.max(0, Math.min(1, y / max));
+  }
+  window.addEventListener('scroll', function () { targetProgress = getScrollProgress(); }, { passive: true });
+  window.addEventListener('resize', function () {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  var mouseX = 0, mouseY = 0, targetTiltX = 0, targetTiltY = 0;
+  if (!reduceMotion) {
+    window.addEventListener('mousemove', function (e) {
+      mouseX = (e.clientX / window.innerWidth - 0.5);
+      mouseY = (e.clientY / window.innerHeight - 0.5);
+    }, { passive: true });
+  }
+
+  function smoothstep(a, b, x) {
+    var t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
+
+  function updatePanels(progress) {
+    stageRanges.forEach(function (s) {
+      var mid = (s.start + s.end) / 2;
+      var span = (s.end - s.start) / 2;
+      var fadeEdge = span * 0.4;
+      var op;
+      if (progress < s.start - fadeEdge || progress > s.end + fadeEdge) op = 0;
+      else if (progress < s.start) op = smoothstep(s.start - fadeEdge, s.start, progress);
+      else if (progress > s.end) op = 1 - smoothstep(s.end, s.end + fadeEdge, progress);
+      else op = 1;
+      s.el.style.opacity = op.toFixed(3);
+      s.el.style.transform = 'translateY(' + ((1 - op) * 14) + 'px)';
+    });
+    scrollCue.style.opacity = progress < 0.03 ? 1 : 0;
+  }
+
+  var totalDepth = 800;
+
+  function render(progress) {
+    var z = 6 - progress * (totalDepth + 60);
+    camera.position.z += (z - camera.position.z);
+
+    if (!reduceMotion) {
+      targetTiltX += (mouseY * 0.15 - targetTiltX) * 0.04;
+      targetTiltY += (mouseX * 0.2 - targetTiltY) * 0.04;
+      camera.rotation.x = -targetTiltX;
+      camera.rotation.y = -targetTiltY + Math.sin(progress * Math.PI * 2) * 0.03;
+    } else {
+      camera.rotation.set(0, 0, 0);
+    }
+
+    var heroFade = 1 - smoothstep(0.0, 0.09, progress);
+    heroWire.material.opacity = 0.55 * heroFade;
+    heroRings.forEach(function (r, i) {
+      r.material.opacity = 0.4 * heroFade;
+      if (!reduceMotion) r.rotation.z += 0.001 * (i + 1);
+    });
+    if (!reduceMotion) { heroWire.rotation.y += 0.0025; heroWire.rotation.x += 0.0008; }
+
+    if (!reduceMotion) {
+      latticeGroup.rotation.z += 0.0012;
+      latticeGroup.children.forEach(function (m, i) { m.rotation.x += 0.002 + (i % 3) * 0.0005; });
+    }
+
+    if (!reduceMotion) { ribGroup.rotation.y += 0.0016; ribGroup.rotation.x = Math.sin(performance.now() * 0.0002) * 0.05; }
+
+    var asmProg = smoothstep(0.40, 0.60, progress);
+    assemblyParts.forEach(function (p) {
+      var ang = p.angle + asmProg * Math.PI * 0.6 + (reduceMotion ? 0 : performance.now() * 0.00006);
+      var rad = p.radius * (1 - asmProg * 0.55);
+      p.mesh.position.x = Math.cos(ang) * rad;
+      p.mesh.position.y = Math.sin(ang) * rad;
+      if (!reduceMotion) { p.mesh.rotation.x += 0.004; p.mesh.rotation.y += 0.003; }
+    });
+
+    var approachProg = smoothstep(0.60, 0.665, progress);
+    impactorMat.material.opacity = Math.sin(Math.min(approachProg, 1) * Math.PI) * 0.9 * (approachProg < 1 ? 1 : 0);
+    impactorMat.position.z = 30 - approachProg * 30;
+    if (!reduceMotion) impactorMat.rotation.x += 0.02;
+
+    var ignProg = smoothstep(0.665, 0.80, progress);
+    var posAttr = burstGeo.attributes.position;
+    for (var b = 0; b < burstCount; b++) {
+      var d = burstDir[b];
+      var dist = ignProg * 6.5;
+      posAttr.array[b * 3] = d[0] * dist;
+      posAttr.array[b * 3 + 1] = d[1] * dist;
+      posAttr.array[b * 3 + 2] = d[2] * dist;
+    }
+    posAttr.needsUpdate = true;
+    burstMat.opacity = Math.sin(Math.min(ignProg, 1) * Math.PI) * 0.85;
+
+    var wingProg = smoothstep(0.86, 1.0, progress);
+    bodyMesh.material.opacity = smoothstep(0.84, 0.92, progress) * 0.6;
+    wingL.rotation.z = -1.3 + wingProg * 1.3;
+    wingR.rotation.z = 1.3 - wingProg * 1.3;
+    wingL.children[0].material.opacity = wingProg * 0.5;
+    wingR.children[0].material.opacity = wingProg * 0.5;
+    if (!reduceMotion) birdGroup.rotation.y += 0.001;
+
+    var mya = Math.max(0, 252 - progress * 252);
+    depthVal.textContent = (progress > 0.985 ? 0 : mya).toFixed(1) + ' MYA';
+    var stageIndex = Math.min(5, Math.floor(progress * 6));
+    stageVal.textContent = stageNames[stageIndex];
+    gaugeFill.style.height = (progress * 100).toFixed(1) + '%';
+    ticks.forEach(function (t) { t.classList.toggle('active', Number(t.getAttribute('data-i')) === stageIndex); });
+
+    updatePanels(progress);
+  }
+
+  function loop() {
+    curProgress += (targetProgress - curProgress) * (reduceMotion ? 1 : 0.09);
+    render(curProgress);
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  }
+  targetProgress = getScrollProgress();
+  curProgress = targetProgress;
+  loop();
+})();
+</script>
+</body>
+</html>
